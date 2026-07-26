@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend-app-sa
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-app
+  labels:
+    app: frontend-app
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: backend-app
+  template:
+    metadata:
+      labels:
+        app: frontend-app
+    spec:
+      serviceAccountName: frontend-app-sa
+      containers:
+        - name: frontend-app
+          image: shivamaglwork/node-app:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-app
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+  labels:
+    app: frontend-app
+spec:
+  type: LoadBalancer
+  selector:
+    app: frontend-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      protocol: TCP
