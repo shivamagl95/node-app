@@ -4,9 +4,10 @@
   "description": "Minimal microservice returning timestamp and visitor IP",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/**/*.test.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   }
 }
