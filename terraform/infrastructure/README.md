@@ -25,7 +25,6 @@ infrastructure/
 |------------|-------------|
 | network | VPC, Subnets, Route Tables, NAT Gateways, Security Groups |
 | eks | Amazon EKS clusters and node groups |
-| rds | Amazon RDS databases |
 | observability | Prometheus, Grafana and monitoring stack |
 | k8-apps | Kubernetes add-ons and platform applications |
 
