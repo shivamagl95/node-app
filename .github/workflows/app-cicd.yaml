@@ -51,7 +51,7 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./app
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/node-app:${{ steps.vars.outputs.sha_short }}
