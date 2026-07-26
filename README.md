@@ -264,7 +264,7 @@ The following URLs provide access to deployed platform components (dev environme
 
 The image is publicly available on Docker Hub:
 ```
-docker pull <dockerhub-username>/<image-name>:latest
+docker pull shivamaglwork/node-app:latest
 ```
 
 - Runs as a **non-root user** inside the container.
