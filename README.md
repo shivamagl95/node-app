@@ -28,11 +28,14 @@ A minimal Node.js microservice that returns the current timestamp and the visito
 ```
 
 Each module folder has its own README with module-specific architecture and variable details:
+- [`app/README.md`](app/README.md) — Application build, test, and container details
 - [`infrastructure/aws/network/README.md`](infrastructure/aws/network/README.md) — VPC/networking design
 - [`infrastructure/aws/eks/README.md`](infrastructure/aws/eks/README.md) — EKS cluster design
 - [`infrastructure/aws/k8-apps/README.md`](infrastructure/aws/k8-apps/README.md) — App deployment & Ingress/ALB setup
 
 ## Architecture
+
+![Architecture Diagram](terraform/infrastructure/docs/arch-new.png)
 
 - **VPC** with public and private subnets across multiple Availability Zones.
 - **Amazon EKS** cluster — application pods run in **private subnets only**.
@@ -181,7 +184,7 @@ terraform plan --var-file=../../vars/global-eks.tfvars
 terraform apply --var-file=../../vars/global-eks.tfvars
 ```
 
-### 3. K8s Apps (ALB Controller, app deployment, Ingress)
+### 3. K8s Apps (ALB Controller, ArgoCD, monitoring)
 ```bash
 cd infrastructure/aws/k8-apps
 terraform init
@@ -194,17 +197,46 @@ Type `yes` when prompted at each `apply` step. Default values for each module's 
 
 > **Note:** `terraform workspace new dev` will fail with "workspace already exists" if you've already created it in a prior run — in that case use `terraform workspace select dev` instead, then continue with `plan`/`apply`.
 
-## Accessing the Application
+### 4. Bootstrap the Application via ArgoCD
 
-Once `terraform apply` completes, retrieve the ALB DNS name:
+At this point, ArgoCD and monitoring are running, but the **application itself isn't deployed yet** — it needs to be registered in ArgoCD and synced via the CI/CD pipeline. Follow these steps in order:
 
+**a. Connect kubectl to the cluster**
 ```bash
 aws eks update-kubeconfig --region us-east-1 --name <cluster-name>
-kubectl get ingress -n <namespace>
 ```
 
-Access the app:
+**b. Fetch the ArgoCD admin password**
 ```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
+Username: `admin`
+
+**c. (Optional) Fetch the Grafana admin password**
+```bash
+kubectl -n monitoring get secret <release-name>-grafana -o jsonpath="{.data.admin-password}" | base64 -d
+```
+Username: `admin` (replace `<release-name>-grafana` with your actual Grafana secret name — find it via `kubectl -n monitoring get secrets | grep grafana`)
+
+**d. Log into ArgoCD and create the application**
+Get the ArgoCD server URL:
+```bash
+kubectl get ingress -n argocd
+```
+Log in (UI or CLI) with the `admin` credentials from step b, then create a new Application named **`node-app`** pointing at this repo's app manifests/path.
+
+**e. Push your changes to GitHub**
+```bash
+git add .
+git commit -m "Deploy node-app"
+git push origin main
+```
+This triggers the GitHub Actions pipeline, which builds the image, pushes it to Docker Hub, and updates the image tag ArgoCD watches — ArgoCD then syncs `node-app` into the cluster automatically.
+
+**f. Verify the deployment**
+Once ArgoCD shows `node-app` as `Synced`/`Healthy`, get its Ingress to confirm the app is reachable:
+```bash
+kubectl get ingress -n <node-app-namespace>
 curl http://<alb-dns-name>/
 ```
 
@@ -227,22 +259,6 @@ The following URLs provide access to deployed platform components (dev environme
 | Grafana | Dev | http://k8s-monitori-devmonit-faef1db893-715403829.us-east-1.elb.amazonaws.com/ |
 
 > ArgoCD and Grafana login credentials have been shared separately via email.
-
-### Fetching credentials yourself
-
-If you've deployed your own instance (or need to re-fetch the passwords), use:
-
-**ArgoCD admin password:**
-```bash
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
-```
-Username: `admin`
-
-**Grafana admin password:**
-```bash
-kubectl -n monitoring get secret <release-name>-grafana -o jsonpath="{.data.admin-password}" | base64 -d
-```
-Username: `admin` (replace `<release-name>-grafana` with your actual Grafana secret name — find it via `kubectl -n monitoring get secrets | grep grafana`)
 
 ## Container Image
 
