@@ -1,4 +1,4 @@
-# Infrastructure Setup for 3 tier Application
+# Infrastructure Setup for Sample web Application
 
 ## Overview
 
@@ -25,14 +25,14 @@ infrastructure/
 |------------|-------------|
 | network | VPC, Subnets, Route Tables, NAT Gateways, Security Groups |
 | eks | Amazon EKS clusters and node groups |
-| observability | Prometheus, Grafana and monitoring stack |
+| observability in EKS | Prometheus, Grafana and monitoring stack |
 | k8-apps | Kubernetes add-ons and platform applications |
 
 ## Deployment Order
 
 1. Network
 2. EKS
-3. Observability
+3. Observability in EKS
 4. Kubernetes Applications
 
 ## Prerequisites
