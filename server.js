@@ -10,7 +10,7 @@ function getClientIp(req) {
   return req.socket.remoteAddress;
 }
 
-const server = http.createServer((req, res) => {
+function requestHandler(req, res) {
   if (req.method === 'GET' && req.url === '/') {
     const body = JSON.stringify({
       timestamp: new Date().toISOString(),
@@ -27,13 +27,19 @@ const server = http.createServer((req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not Found' }));
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+const server = http.createServer(requestHandler);
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  server.close(() => process.exit(0));
-});
+// Only start listening when run directly (not when imported in tests)
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+
+  process.on('SIGTERM', () => {
+    server.close(() => process.exit(0));
+  });
+}
+
+module.exports = { server, requestHandler, getClientIp };
