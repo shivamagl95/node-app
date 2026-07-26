@@ -125,6 +125,6 @@ The following URLs provide access to deployed platform components.
 
 | Service | Environment | URL |
 |----------|------------|-----|
-| Frontend Application | Dev | http://k8s-frontend-frontend-a7dacf80be-b430be2625566a75.elb.us-east-1.amazonaws.com/ |
+| Frontend Application | Dev | http://k8s-frontend-frontend-fa5a354a1b-e003c1529fc4adf0.elb.us-east-1.amazonaws.com/ |
 | ArgoCD | Dev | http://k8s-argocd-argocd-35c95ecac2-224874988.us-east-1.elb.amazonaws.com/ |
 | Grafana | Dev | http://k8s-monitori-devmonit-faef1db893-715403829.us-east-1.elb.amazonaws.com/ |
