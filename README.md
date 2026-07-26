@@ -2,6 +2,12 @@
 
 A minimal Node.js microservice that returns the current timestamp and the visitor's IP address as JSON, containerized and deployed to AWS EKS using Terraform.
 
+> **Current Settings**
+> This repo is configured with the following defaults for the remote state backend. **Feel free to change these to your own** before deploying — just update the values below wherever they're referenced (backend blocks in each module).
+> - S3 bucket: `tf-state-aws-bucket01`
+> - DynamoDB lock table: `terraform-lock`
+> - Region: `us-east-1`
+
 ```json
 {
   "timestamp": "2026-07-26T10:00:00.000Z",
@@ -13,10 +19,18 @@ A minimal Node.js microservice that returns the current timestamp and the visito
 
 ```
 .
-├── app/                        # Application source code + Dockerfile
-├── terraform/infrastructure/   # Terraform code (networking, EKS, ALB, app deployment)
-└── .github/workflows/          # CI/CD pipeline (build, test, push image)
+├── app/                              # Application source code + Dockerfile
+├── infrastructure/aws/network/       # VPC, subnets, NAT/IGW, routing (Terraform module)
+├── infrastructure/aws/eks/           # EKS cluster + node groups (Terraform module)
+├── infrastructure/aws/k8-apps/       # ALB Controller, app deployment, Ingress (Terraform module)
+├── vars/                             # Environment-specific .tfvars files
+└── .github/workflows/                # CI/CD pipeline (build, test, push image)
 ```
+
+Each module folder has its own README with module-specific architecture and variable details:
+- [`infrastructure/aws/network/README.md`](infrastructure/aws/network/README.md) — VPC/networking design
+- [`infrastructure/aws/eks/README.md`](infrastructure/aws/eks/README.md) — EKS cluster design
+- [`infrastructure/aws/k8-apps/README.md`](infrastructure/aws/k8-apps/README.md) — App deployment & Ingress/ALB setup
 
 ## Architecture
 
@@ -91,36 +105,37 @@ Terraform state and locking require an S3 bucket and a DynamoDB table. Create th
 **Create the S3 bucket** (bucket names must be globally unique):
 ```bash
 aws s3api create-bucket \
-  --bucket <your-unique-bucket-name> \
+  --bucket tf-state-aws-bucket01 \
   --region us-east-1
 
 aws s3api put-bucket-versioning \
-  --bucket <your-unique-bucket-name> \
+  --bucket tf-state-aws-bucket01 \
   --versioning-configuration Status=Enabled
 ```
 
 **Create the DynamoDB lock table:**
 ```bash
 aws dynamodb create-table \
-  --table-name terraform-locks \
+  --table-name terraform-lock \
   --attribute-definitions AttributeName=LockID,AttributeType=S \
   --key-schema AttributeName=LockID,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
   --region us-east-1
 ```
 
-Then update the backend configuration in `terraform/infrastructure/backend.tf` (or equivalent) with your bucket and table names:
+Then ensure the backend configuration in each module (`infrastructure/aws/network`, `infrastructure/aws/eks`, `infrastructure/aws/k8-apps`) points to your bucket and table names:
 ```hcl
 terraform {
   backend "s3" {
-    bucket         = "<your-unique-bucket-name>"
-    key            = "simpletimeservice/terraform.tfstate"
+    bucket         = "tf-state-aws-bucket01"
+    key            = "simpletimeservice/<module-name>/terraform.tfstate"
     region         = "us-east-1"
-    dynamodb_table = "terraform-locks"
+    dynamodb_table = "terraform-lock"
     encrypt        = true
   }
 }
 ```
+> Each module uses its own `key` path in the same bucket, and Terraform **workspaces** (e.g. `dev`) further isolate state per environment within each module — see [Deploying the Infrastructure](#deploying-the-infrastructure) below.
 
 ## Authenticate to AWS
 
@@ -146,17 +161,38 @@ export AWS_DEFAULT_REGION="us-east-1"
 
 ## Deploying the Infrastructure
 
-```bash
-cd terraform/infrastructure
+Infrastructure is split into three Terraform modules, deployed **in order** — each depends on resources created by the previous one. All three use a Terraform **workspace** (`dev`) to isolate state for the environment being deployed.
 
+### 1. Network (VPC, subnets, NAT/IGW)
+```bash
+cd infrastructure/aws/network
 terraform init
+terraform workspace new dev        # use 'terraform workspace select dev' if it already exists
+terraform plan --var-file=../../vars/global-network.tfvars
+terraform apply --var-file=../../vars/global-network.tfvars
+```
+
+### 2. EKS (cluster + node groups)
+```bash
+cd infrastructure/aws/eks
+terraform init
+terraform workspace new dev        # use 'terraform workspace select dev' if it already exists
+terraform plan --var-file=../../vars/global-eks.tfvars
+terraform apply --var-file=../../vars/global-eks.tfvars
+```
+
+### 3. K8s Apps (ALB Controller, app deployment, Ingress)
+```bash
+cd infrastructure/aws/k8-apps
+terraform init
+terraform workspace new dev        # use 'terraform workspace select dev' if it already exists
 terraform plan
 terraform apply
 ```
 
-Type `yes` when prompted. This will provision the VPC, EKS cluster, ALB Ingress Controller, and deploy the application — end to end.
+Type `yes` when prompted at each `apply` step. Default values for each module's variables are provided in the corresponding `vars/*.tfvars` file — override with additional `-var` flags if needed.
 
-Default values for all variables are provided in `terraform.tfvars`. Override any of them with `-var` flags or by editing `terraform.tfvars` directly.
+> **Note:** `terraform workspace new dev` will fail with "workspace already exists" if you've already created it in a prior run — in that case use `terraform workspace select dev` instead, then continue with `plan`/`apply`.
 
 ## Accessing the Application
 
@@ -180,6 +216,34 @@ Expected response:
 }
 ```
 
+## Currently Deployed Resources
+
+The following URLs provide access to deployed platform components (dev environment).
+
+| Service | Environment | URL |
+|----------|------------|-----|
+| Frontend Application | Dev | http://k8s-frontend-frontend-a7dacf80be-b430be2625566a75.elb.us-east-1.amazonaws.com/ |
+| ArgoCD | Dev | http://k8s-argocd-argocd-35c95ecac2-224874988.us-east-1.elb.amazonaws.com/ |
+| Grafana | Dev | http://k8s-monitori-devmonit-faef1db893-715403829.us-east-1.elb.amazonaws.com/ |
+
+> ArgoCD and Grafana login credentials have been shared separately via email.
+
+### Fetching credentials yourself
+
+If you've deployed your own instance (or need to re-fetch the passwords), use:
+
+**ArgoCD admin password:**
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
+Username: `admin`
+
+**Grafana admin password:**
+```bash
+kubectl -n monitoring get secret <release-name>-grafana -o jsonpath="{.data.admin-password}" | base64 -d
+```
+Username: `admin` (replace `<release-name>-grafana` with your actual Grafana secret name — find it via `kubectl -n monitoring get secrets | grep grafana`)
+
 ## Container Image
 
 The image is publicly available on Docker Hub:
@@ -199,19 +263,40 @@ A GitHub Actions workflow (`.github/workflows/`) automatically:
 
 ## Tearing Down
 
-To avoid ongoing AWS charges, destroy all provisioned resources when done:
+To avoid ongoing AWS charges, destroy all provisioned resources when done — **in reverse order** (k8-apps → eks → network), since later modules depend on earlier ones:
+
+### 1. K8s Apps
 ```bash
-cd terraform/infrastructure
+cd infrastructure/aws/k8-apps
+terraform workspace select dev
 terraform destroy
 ```
 
+### 2. EKS
+```bash
+cd infrastructure/aws/eks
+terraform workspace select dev
+terraform destroy --var-file=../../vars/global-eks.tfvars
+```
+
+### 3. Network
+```bash
+cd infrastructure/aws/network
+terraform workspace select dev
+terraform destroy --var-file=../../vars/global-network.tfvars
+```
+
+Type `yes` when prompted at each step.
+
+> Optional cleanup: once you no longer need the `dev` workspace in a module, you can remove it with `terraform workspace select default && terraform workspace delete dev`.
+
 You are responsible for manually deleting the S3 bucket and DynamoDB table created in the one-time setup step, if no longer needed:
 ```bash
-aws s3 rb s3://<your-unique-bucket-name> --force
-aws dynamodb delete-table --table-name terraform-locks
+aws s3 rb s3://tf-state-aws-bucket01 --force
+aws dynamodb delete-table --table-name terraform-lock
 ```
 
 ## Notes
 
 - This project was built as a solution to a DevOps take-home challenge, demonstrating containerization, IaC, and cloud networking best practices.
-- All infrastructure is provisioned via `terraform plan` / `terraform apply` only — no manual console steps are required beyond the one-time backend setup described above.
+- Infrastructure is provisioned via `terraform plan` / `terraform apply` per module — no manual AWS console steps are required beyond the one-time backend setup and workspace creation described above.
